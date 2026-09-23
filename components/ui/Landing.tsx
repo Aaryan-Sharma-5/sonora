@@ -124,7 +124,7 @@ export default function Landing() {
               onClick={typeDemo}
               className="cursor-pointer text-[13px] text-text-3 transition-colors duration-300 hover:text-text-2"
             >
-              Or start with Radiohead, Pink Floyd, Tame Impala…
+              Or start with A.R. Rahman, Kishore Kumar, Lata Mangeshkar…
             </button>
           )}
         </div>
