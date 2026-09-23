@@ -72,7 +72,9 @@ export function ActionBar() {
     <AnimatePresence>
       {phase === "ready" && (
         <motion.div {...fade} className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end justify-between px-10 pb-9">
-          <div className="pointer-events-auto flex gap-3">
+          <div className="pointer-events-auto relative flex gap-3">
+            {/* In DNA and discovery the controls get their own region beneath the readout. */}
+            {mode !== "universe" && <div className="absolute -top-7 left-0 h-px w-[360px] bg-line" />}
             {mode === "universe" ? (
               <>
                 <button type="button" className="control" onClick={() => setMode("dna")}>
@@ -99,7 +101,7 @@ export function ActionBar() {
           </div>
 
           <form
-            className="pointer-events-auto flex w-[280px] items-center border-b border-line transition-colors duration-300 focus-within:border-[rgba(122,167,255,0.55)]"
+            className="pointer-events-auto w-[280px]"
             onSubmit={(e) => {
               e.preventDefault();
               if (!draft.trim() || adding) return;
@@ -107,16 +109,21 @@ export function ActionBar() {
               setDraft("");
             }}
           >
-            <span className="pr-3 text-[15px] text-text-3">+</span>
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              disabled={adding}
-              placeholder={adding ? "Placing…" : "What if I add…"}
-              className="h-10 w-full bg-transparent text-[14px] text-text placeholder:text-text-3 outline-none"
-              spellCheck={false}
-              autoComplete="off"
-            />
+            <label htmlFor="what-if" className="caption block text-text-3">
+              What if I add…
+            </label>
+            <div className="mt-1 flex items-center border-b border-line transition-colors duration-300 focus-within:border-[rgba(122,167,255,0.55)]">
+              <input
+                id="what-if"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                disabled={adding}
+                placeholder={adding ? "Listening…" : "An artist"}
+                className="h-10 w-full bg-transparent text-[15px] text-text placeholder:text-text-3 outline-none"
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
           </form>
         </motion.div>
       )}

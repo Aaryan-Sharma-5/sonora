@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { computeLayout, type Layout } from "./layout";
+import { computeLayout, findConnection, type Hop, type Layout } from "./layout";
 import { demoExpansion, demoUniverse, demoUniverseFor } from "./demo";
 import { LIMITS, mergeExpansion, slug, type UniverseData } from "./universe";
 
@@ -19,12 +19,15 @@ export interface SonoraState {
   selectedId: string | null;
   status: { text: string; sentence?: boolean } | null;
   adding: boolean;
+  // "What connects these?": picking a second artist (no `to` yet), then the found path.
+  connect: { from: string; to?: string; ids?: string[]; hops?: Hop[] } | null;
 
   create: (artists: string[]) => Promise<void>;
   hover: (id: string | null) => void;
   select: (id: string | null) => void;
   setMode: (mode: Mode) => void;
   addArtist: (name: string) => Promise<void>;
+  startConnect: (from: string) => void;
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -90,6 +93,7 @@ export const useSonora = create<SonoraState>((set, get) => {
     selectedId: null,
     status: null,
     adding: false,
+    connect: null,
 
     async create(artists) {
       if (get().phase !== "landing") return;
@@ -124,12 +128,33 @@ export const useSonora = create<SonoraState>((set, get) => {
     },
 
     select(id) {
+      const s = get();
+      if (s.connect && !s.connect.to && id && id.startsWith("a:") && id !== s.connect.from && s.layout && s.data) {
+        const path = findConnection(s.layout, s.data, s.connect.from, id);
+        if (path) {
+          set({ connect: { from: s.connect.from, to: id, ...path }, selectedId: null, hoveredId: null });
+          flash(null);
+        } else {
+          flash("Nothing on this map connects them yet.", 3200);
+        }
+        return;
+      }
+      if (s.connect) {
+        flash(null);
+        set({ connect: null });
+      }
       if (get().selectedId !== id) set({ selectedId: id, hoveredId: null });
+    },
+
+    startConnect(from) {
+      if (get().phase !== "ready" || (get().data?.artists.length ?? 0) < 2) return;
+      set({ connect: { from }, selectedId: from });
+      flash("Choose another artist.");
     },
 
     setMode(mode) {
       if (get().phase !== "ready" || get().mode === mode) return;
-      set({ mode, selectedId: null, hoveredId: null });
+      set({ mode, selectedId: null, hoveredId: null, connect: null });
     },
 
     async addArtist(name) {
@@ -144,8 +169,8 @@ export const useSonora = create<SonoraState>((set, get) => {
         flash("Your universe is full.", 3000);
         return;
       }
-      set({ adding: true, mode: "universe", selectedId: null, hoveredId: null });
-      flash(`Placing ${clean}…`);
+      set({ adding: true, mode: "universe", selectedId: null, hoveredId: null, connect: null });
+      flash(`Adding ${clean}…`);
 
       const merged = await fetchExpansion(s.data, clean);
       set({ data: merged.universe, layout: computeLayout(merged.universe), adding: false });
@@ -158,3 +183,8 @@ export const useSonora = create<SonoraState>((set, get) => {
     },
   };
 });
+
+// Development only: lets visual QA scripts inspect and drive the store.
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as { __sonora: typeof useSonora }).__sonora = useSonora;
+}

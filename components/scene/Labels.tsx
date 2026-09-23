@@ -72,14 +72,70 @@ export function LabelLayer({ layout }: { layout: Layout }) {
   );
 }
 
+/** The metadata annotation and its hairline leader, positioned by the projector below. */
+export const annotation: { el: HTMLDivElement | null; leader: SVGLineElement | null } = { el: null, leader: null };
+
+/** The node the annotation is attached to: the selection, or the end of a found connection. */
+export function annotatedId(s: { selectedId: string | null; connect: { to?: string } | null }) {
+  return s.selectedId ?? s.connect?.to ?? null;
+}
+
 const v = new THREE.Vector3();
 const last = new Map<string, number>();
+const rect = { x: 0, y: 0, w: 0, h: 0, on: false };
+const GAP = 64;
+const EDGE = 32;
+
+/**
+ * Keep the annotation attached to its object: beside it on screen, on whichever
+ * side has room, clamped inside the viewport and clear of the controls.
+ */
+function placeAnnotation(s: ReturnType<typeof useSonora.getState>, camera: THREE.Camera, W: number, H: number) {
+  const el = annotation.el;
+  const line = annotation.leader;
+  rect.on = false;
+  if (!el || !line) return;
+  const id = annotatedId(s);
+  const a = id ? nodeAnims.get(id) : undefined;
+  if (!id || !a) {
+    line.style.opacity = "0";
+    return;
+  }
+  v.set(a.pos.x.value, a.pos.y.value, a.pos.z.value).project(camera);
+  const nx = (v.x * 0.5 + 0.5) * W;
+  const ny = (-v.y * 0.5 + 0.5) * H;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const minX = s.phase === "ready" && s.mode !== "universe" ? 440 : EDGE;
+  let x = nx + GAP;
+  const leftSide = x + w > W - EDGE;
+  if (leftSide) x = nx - GAP - w;
+  x = Math.min(Math.max(x, minX), W - EDGE - w);
+  const y = Math.min(Math.max(ny - 36, 92), Math.max(92, H - 130 - h));
+  el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+  Object.assign(rect, { x, y, w, h, on: true });
+
+  // The leader runs from just outside the body to the annotation's first line.
+  const ex = leftSide ? x + w + 12 : x - 12;
+  const ey = y + 10;
+  const dx = ex - nx;
+  const dy = ey - ny;
+  const len = Math.hypot(dx, dy) || 1;
+  const start = Math.min(18, len);
+  line.setAttribute("x1", (nx + (dx / len) * start).toFixed(1));
+  line.setAttribute("y1", (ny + (dy / len) * start).toFixed(1));
+  line.setAttribute("x2", ex.toFixed(1));
+  line.setAttribute("y2", ey.toFixed(1));
+  line.style.opacity = v.z > 1 || len < 30 ? "0" : "1";
+}
 
 export function LabelProjector() {
   useFrame(({ camera, size }) => {
     const s = useSonora.getState();
     const L = s.layout;
     if (!L) return;
+    placeAnnotation(s, camera, size.width, size.height);
+    const anchor = annotatedId(s);
     for (const [id, el] of labelEls) {
       let opacity = 0;
       let offset = "translate(-50%, -50%)";
@@ -103,15 +159,15 @@ export function LabelProjector() {
       }
       v.project(camera);
       if (v.z > 1) opacity = 0;
-      const sx = (v.x * 0.5 + 0.5) * size.width;
-      // Labels give way to the panels that sit over the scene.
-      if (s.selectedId && sx > size.width - 440) opacity *= 0.12;
-      if (s.phase === "ready" && s.mode !== "universe" && sx < 440) opacity *= 0.12;
+      const x = (v.x * 0.5 + 0.5) * size.width;
+      const y = (-v.y * 0.5 + 0.5) * size.height;
+      // Labels give way to the annotation and the mode readout that sit over the scene.
+      const underAnnotation = rect.on && id !== anchor && x > rect.x - 16 && x < rect.x + rect.w + 16 && y > rect.y - 16 && y < rect.y + rect.h + 16;
+      if (underAnnotation) opacity *= 0.1;
+      if (s.phase === "ready" && s.mode !== "universe" && x < 440) opacity *= 0.12;
       const prev = last.get(id) ?? -1;
       if (opacity < 0.01 && prev < 0.01) continue;
       last.set(id, opacity);
-      const x = sx;
-      const y = (-v.y * 0.5 + 0.5) * size.height;
       el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) ${offset}`;
       el.style.opacity = opacity.toFixed(3);
     }

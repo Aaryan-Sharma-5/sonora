@@ -73,11 +73,13 @@ export function computeLayout(u: UniverseData): Layout {
   // Traits: inner ring, strongest closest to YOU.
   const traitOffset = rand("traits") * TAU;
   const traitAngle = new Map<string, number>();
+  const traitDnaAngle = new Map<string, number>();
   u.traits.forEach((t, i) => {
     const a = traitOffset + (i * TAU) / u.traits.length + (rand(t.id + "a") - 0.5) * 0.25;
     traitAngle.set(t.id, a);
     const r = (4.6 + (1 - t.strength) * 3.4) * k;
     const dnaA = -Math.PI / 2 + (i * TAU) / u.traits.length;
+    traitDnaAngle.set(t.id, dnaA);
     nodes.push({
       id: t.id,
       kind: "trait",
@@ -166,20 +168,48 @@ export function computeLayout(u: UniverseData): Layout {
     }
   }
 
+  // DNA ring: each artist sits on an outer orbit beside the traits it carries,
+  // so hovering it reads as "this is what I bring".
+  const dnaAngles = artistPts.map((p, i) => {
+    let sx = 0;
+    let sz = 0;
+    for (const t of p.a.traits) {
+      const ang = traitDnaAngle.get(t);
+      if (ang === undefined) continue;
+      sx += Math.cos(ang);
+      sz += Math.sin(ang);
+    }
+    return sx === 0 && sz === 0 ? -Math.PI / 2 + ((i + 0.5) * TAU) / artistPts.length : Math.atan2(sz, sx);
+  });
+  const minGap = TAU / (artistPts.length * 1.7);
+  for (let iter = 0; iter < 40; iter++) {
+    for (let i = 0; i < dnaAngles.length; i++) {
+      for (let j = i + 1; j < dnaAngles.length; j++) {
+        let d = dnaAngles[j] - dnaAngles[i];
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        if (Math.abs(d) >= minGap) continue;
+        const push = (minGap - Math.abs(d)) / 2 || minGap / 2;
+        const dir = d >= 0 ? 1 : -1;
+        dnaAngles[i] -= push * dir;
+        dnaAngles[j] += push * dir;
+      }
+    }
+  }
+
   let radius = 0;
-  for (const p of artistPts) {
-    const angle = Math.atan2(p.z, p.x);
+  artistPts.forEach((p, i) => {
     radius = Math.max(radius, p.r);
     nodes.push({
       id: p.a.id,
       kind: "artist",
       name: p.a.name,
       pos: [p.x, (rand(p.a.id + "y") - 0.5) * 3.6, p.z],
-      dnaPos: polar(angle, 32, -3.5),
+      // An ellipse, wider than tall, to fit the frame around the trait constellation.
+      dnaPos: [Math.cos(dnaAngles[i]) * 25, -1.5, Math.sin(dnaAngles[i]) * 19.5],
       size: 0.85 + p.centrality * 0.35,
       seed: rand(p.a.id),
     });
-  }
+  });
 
   // Discovery sector: the widest angular gap between artists and genres.
   const angles = nodes
@@ -233,8 +263,8 @@ export function computeLayout(u: UniverseData): Layout {
   if (u.traits.length >= 3) {
     u.traits.forEach((t, i) => add(t.id, u.traits[(i + 1) % u.traits.length].id, "dna-ring", 0.5, false));
   }
-  // Artist-trait links are the least important; include them only while under budget.
-  for (const a of u.artists) for (const t of a.traits) if (edges.length < 72) add(a.id, t, "artist-trait", 0.4, false);
+  // Artist-trait links are never shown at rest; they carry the DNA contribution view.
+  for (const a of u.artists) for (const t of a.traits) if (edges.length < 110) add(a.id, t, "artist-trait", 0.4, false);
 
   return {
     nodes,
@@ -255,4 +285,73 @@ export function relatedSet(layout: Layout, id: string): Set<string> {
     if (e.b === id) set.add(e.a);
   }
   return set;
+}
+
+export interface Hop {
+  from: string;
+  to: string;
+  kind: EdgeKind;
+  reason: string; // only ever taken from the data; empty when the link is shared membership
+}
+
+/**
+ * What connects two artists on this map? The cheapest path through links that
+ * already exist: direct relationships first, then a shared genre or quality.
+ * Returns null when no short, real path exists; nothing is ever invented.
+ */
+export function findConnection(layout: Layout, u: UniverseData, from: string, to: string): { ids: string[]; hops: Hop[] } | null {
+  const cost: Partial<Record<EdgeKind, (e: LayoutEdge) => number>> = {
+    "artist-artist": (e) => 1 + (1 - e.strength) * 1.5,
+    "artist-genre": () => 1.25,
+    "artist-trait": () => 1.45,
+  };
+  const adj = new Map<string, { to: string; w: number; e: LayoutEdge }[]>();
+  for (const e of layout.edges) {
+    const c = cost[e.kind];
+    if (!c) continue;
+    const w = c(e);
+    for (const [x, y] of [
+      [e.a, e.b],
+      [e.b, e.a],
+    ]) {
+      if (!adj.has(x)) adj.set(x, []);
+      adj.get(x)!.push({ to: y, w, e });
+    }
+  }
+
+  const dist = new Map<string, number>([[from, 0]]);
+  const prev = new Map<string, { id: string; e: LayoutEdge }>();
+  const open = new Set([from]);
+  while (open.size) {
+    let cur = "";
+    let best = Infinity;
+    for (const id of open) if ((dist.get(id) ?? Infinity) < best) [cur, best] = [id, dist.get(id)!];
+    open.delete(cur);
+    if (cur === to) break;
+    for (const n of adj.get(cur) ?? []) {
+      const d = best + n.w;
+      if (d < (dist.get(n.to) ?? Infinity)) {
+        dist.set(n.to, d);
+        prev.set(n.to, { id: cur, e: n.e });
+        open.add(n.to);
+      }
+    }
+  }
+  if (!prev.has(to)) return null;
+
+  const ids = [to];
+  const hops: Hop[] = [];
+  let cur = to;
+  while (cur !== from) {
+    const p = prev.get(cur)!;
+    const rel =
+      p.e.kind === "artist-artist"
+        ? u.relationships.find((r) => (r.a === p.id && r.b === cur) || (r.b === p.id && r.a === cur))
+        : undefined;
+    hops.unshift({ from: p.id, to: cur, kind: p.e.kind, reason: rel?.reason ?? "" });
+    ids.unshift(p.id);
+    cur = p.id;
+  }
+  // A path longer than two intermediate stops no longer explains anything.
+  return ids.length <= 5 ? { ids, hops } : null;
 }

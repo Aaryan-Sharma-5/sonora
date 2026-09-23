@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { strengthWord } from "@/components/scene/Labels";
+import { annotation, strengthWord } from "@/components/scene/Labels";
 import { YOU_ID } from "@/lib/layout";
 import { EASE } from "@/lib/motion";
 import { useSonora } from "@/lib/store";
@@ -47,6 +47,16 @@ function joinRefs(items: { id: string; name: string }[]) {
   ));
 }
 
+const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"];
+const countWord = (n: number) => WORDS[n] ?? String(n);
+
+/** Editorial headlines stay large when short, and step down when Claude runs long. */
+function headlineSize(text: string) {
+  if (text.length > 110) return "text-[21px]";
+  if (text.length > 70) return "text-[25px]";
+  return "text-[30px]";
+}
+
 function traitSentence(name: string, strength: number) {
   const w = strengthWord(strength);
   const n = name.toLowerCase();
@@ -54,6 +64,25 @@ function traitSentence(name: string, strength: number) {
   if (w === "clearly present") return `${name} is clearly present across your selection.`;
   if (w === "present") return `${name} runs through part of your selection.`;
   return `A trace of ${n} appears in your selection.`;
+}
+
+/** Starts "What connects these?" from an artist, or says what to do next. */
+function ConnectEntry({ id, name }: { id: string; name: string }) {
+  const mode = useSonora((s) => s.mode);
+  const picking = useSonora((s) => s.connect?.from === id && !s.connect?.to);
+  const count = useSonora((s) => s.data?.artists.length ?? 0);
+  const startConnect = useSonora((s) => s.startConnect);
+  if (mode !== "universe" || count < 2) return null;
+  if (picking) return <p className="mt-8 text-[13px] text-text-2">Choose another artist on the map.</p>;
+  return (
+    <button
+      type="button"
+      onClick={() => startConnect(id)}
+      className="mt-8 cursor-pointer border-b border-line pb-0.5 text-[13px] text-text-2 transition-colors duration-300 hover:border-line-strong hover:text-text"
+    >
+      What connects {name} to…
+    </button>
+  );
 }
 
 function PanelBody({ id, data }: { id: string; data: UniverseData }) {
@@ -66,7 +95,9 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
     return (
       <>
         <Caption>Your universe</Caption>
-        <h2 className="mt-3 text-[28px] leading-[1.2] font-semibold tracking-[-0.015em] text-text">{data.summary.headline}</h2>
+        <h2 className={`mt-3 ${headlineSize(data.summary.headline)} leading-[1.2] font-semibold tracking-[-0.015em] text-text`}>
+          {data.summary.headline}
+        </h2>
         <p className="mt-4 text-[14.5px] leading-[1.65] text-text-2">{data.summary.description}</p>
         <Section label="Strongest currents">
           <ul className="space-y-1.5 text-[14px] text-text-2">
@@ -95,7 +126,7 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
     return (
       <>
         <Caption>{artist.uncertain ? "Limited information" : "Artist"}</Caption>
-        <h2 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-text">{artist.name}</h2>
+        <h2 className="mt-3 text-[36px] leading-[1.05] font-semibold tracking-[-0.02em] text-text">{artist.name}</h2>
         {artist.genres.length > 0 && (
           <p className="mt-4 text-[14px] text-text-2">{joinRefs(byId(data.genres, artist.genres))}</p>
         )}
@@ -119,6 +150,7 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
             </ul>
           </Section>
         )}
+        <ConnectEntry id={artist.id} name={artist.name} />
       </>
     );
   }
@@ -128,7 +160,9 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
     const members = data.artists.filter((a) => a.genres.includes(id));
     return (
       <>
-        <Caption>Genre</Caption>
+        <Caption>
+          Genre{members.length > 0 && ` · ${members.length} of your artists`}
+        </Caption>
         <h2 className="mt-3 text-[36px] leading-[1.08] font-semibold tracking-[-0.02em] text-text">{genre.name}</h2>
         {genre.description && <p className="mt-4 text-[14.5px] leading-[1.65] text-text-2">{genre.description}</p>}
         {members.length > 0 && (
@@ -168,6 +202,11 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
         <p className="caption text-magenta/80">Uncharted {d.kind}</p>
         <h2 className="mt-3 text-[36px] leading-[1.08] font-semibold tracking-[-0.02em] text-text">{d.name}</h2>
         {d.description && <p className="mt-4 text-[14.5px] leading-[1.65] text-text-2">{d.description}</p>}
+        {bridges.length > 0 && (
+          <Section label="Reached from your universe">
+            <p className="text-[14px] text-text-2">{joinRefs(bridges)}</p>
+          </Section>
+        )}
         {d.why && (
           <Section label="Why it's near">
             <p className="text-[14.5px] leading-[1.65] text-text">{d.why}</p>
@@ -182,52 +221,104 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
             </ul>
           </Section>
         )}
-        {bridges.length > 0 && (
-          <Section label="Reached through">
-            <p className="text-[14px] text-text-2">{joinRefs(bridges)}</p>
-          </Section>
-        )}
       </>
     );
   }
   return null;
 }
 
-export function DetailPanel() {
+/** A found connection, read top to bottom along the path. */
+function ConnectionBody({ data }: { data: UniverseData }) {
+  const connect = useSonora((s) => s.connect);
+  if (!connect?.ids || !connect.hops) return null;
+  const lookup = (id: string) =>
+    data.artists.find((x) => x.id === id) ?? data.genres.find((x) => x.id === id) ?? data.traits.find((x) => x.id === id);
+  return (
+    <>
+      <Caption>What connects these?</Caption>
+      <ol className="mt-4">
+        {connect.ids.map((id, i) => {
+          const node = lookup(id);
+          if (!node) return null;
+          const isArtist = id.startsWith("a:");
+          const hop = i > 0 ? connect.hops![i - 1] : null;
+          return (
+            <li key={id}>
+              {hop && (
+                <div className="ml-[3px] border-l border-line py-2.5 pl-4 text-[13px] leading-[1.55] text-text-2">
+                  {hop.reason || <span className="block h-2" />}
+                </div>
+              )}
+              {isArtist ? (
+                <p className="text-[22px] leading-[1.15] font-semibold tracking-[-0.015em] text-text">
+                  <Ref id={id}>{node.name}</Ref>
+                </p>
+              ) : (
+                <p className="text-[15px] text-text-2">
+                  <Ref id={id}>{node.name}</Ref>
+                  <span className="ml-2 text-[12px] text-text-3">shared {id.startsWith("g:") ? "genre" : "quality"}</span>
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </>
+  );
+}
+
+/**
+ * Editorial metadata attached to the selected object in the universe. The label
+ * projector keeps it beside its body on screen, clamped inside the viewport, and
+ * draws a hairline leader between the two.
+ */
+export function Annotation() {
   const selectedId = useSonora((s) => s.selectedId);
+  const connectTo = useSonora((s) => s.connect?.to);
   const data = useSonora((s) => s.data);
   const select = useSonora((s) => s.select);
-  const open = !!selectedId && !!data;
+  const id = selectedId ?? connectTo ?? null;
 
   return (
     <>
-      {/* A functional scrim so the panel stays legible over bright regions. */}
-      <motion.div
-        className="pointer-events-none absolute inset-y-0 right-0 z-10 w-[560px] bg-gradient-to-l from-[#05060A]/90 via-[#05060A]/55 to-transparent"
-        animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration: 0.9, ease: EASE }}
-      />
-      <AnimatePresence mode="wait">
-        {open && (
-          <motion.aside
-            key={selectedId}
-            initial={{ opacity: 0, x: 14 }}
-            animate={{ opacity: 1, x: 0, transition: { duration: 0.9, ease: EASE, delay: 0.35 } }}
-            exit={{ opacity: 0, x: 8, transition: { duration: 0.35, ease: EASE } }}
-            className="absolute top-28 right-10 z-20 max-h-[calc(100vh-220px)] w-[340px] overflow-y-auto pr-1"
-          >
-            <button
-              type="button"
-              onClick={() => select(null)}
-              aria-label="Close"
-              className="absolute top-0 right-0 flex h-7 w-7 cursor-pointer items-center justify-center border border-line text-[14px] text-text-3 transition-colors duration-300 hover:border-line-strong hover:text-text"
+      <svg className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden>
+        <line
+          ref={(el) => {
+            annotation.leader = el;
+          }}
+          stroke="rgba(245,247,250,0.24)"
+          strokeWidth={1}
+          style={{ opacity: 0, transition: "opacity 0.6s cubic-bezier(0.33, 1, 0.68, 1)" }}
+        />
+      </svg>
+      <div
+        ref={(el) => {
+          annotation.el = el;
+        }}
+        className="absolute top-0 left-0 z-20 w-[320px] [text-shadow:0_0_22px_#05060A,0_0_6px_#05060A]"
+      >
+        <AnimatePresence mode="wait">
+          {id && data && (
+            <motion.div
+              key={id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0, transition: { duration: 0.9, ease: EASE, delay: 0.45 } }}
+              exit={{ opacity: 0, transition: { duration: 0.3, ease: EASE } }}
+              className="relative max-h-[calc(100vh-240px)] overflow-y-auto pr-1"
             >
-              ×
-            </button>
-            <PanelBody id={selectedId!} data={data!} />
-          </motion.aside>
-        )}
-      </AnimatePresence>
+              <button
+                type="button"
+                onClick={() => select(null)}
+                aria-label="Close"
+                className="absolute top-0 right-0 flex h-7 w-7 cursor-pointer items-center justify-center border border-line text-[14px] text-text-3 transition-colors duration-300 hover:border-line-strong hover:text-text"
+              >
+                ×
+              </button>
+              <div className="pr-10">{selectedId ? <PanelBody id={selectedId} data={data} /> : <ConnectionBody data={data} />}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </>
   );
 }
@@ -239,7 +330,12 @@ export function ModeReadout() {
   const select = useSonora((s) => s.select);
   const hover = useSonora((s) => s.hover);
   const hoveredId = useSonora((s) => s.hoveredId);
+  const selectedId = useSonora((s) => s.selectedId);
   const show = phase === "ready" && data && mode !== "universe";
+  // In DNA, hovering an artist on the orbit shows the traits it carries.
+  const focusId = hoveredId ?? selectedId;
+  const focusArtist = focusId?.startsWith("a:") ? data?.artists.find((a) => a.id === focusId) : undefined;
+  const hoveredTrait = hoveredId?.startsWith("t:") ? hoveredId : null;
 
   return (
     <>
@@ -256,55 +352,82 @@ export function ModeReadout() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0, transition: { duration: 1, ease: EASE, delay: 1.1 } }}
           exit={{ opacity: 0, transition: { duration: 0.4, ease: EASE } }}
-          className="absolute top-28 left-10 z-20 w-[360px]"
+          className="absolute top-28 bottom-32 left-10 z-20 flex w-[360px] flex-col"
         >
           {mode === "dna" ? (
             <>
               <Caption>Music DNA</Caption>
-              <h2 className="mt-3 text-[30px] leading-[1.18] font-semibold tracking-[-0.015em] text-text">{data.summary.headline}</h2>
-              <p className="mt-4 text-[14px] leading-[1.65] text-text-2">{data.summary.description}</p>
-              <ul className="mt-8 space-y-2">
-                {data.traits.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      onMouseEnter={() => hover(t.id)}
-                      onMouseLeave={() => hover(null)}
-                      onClick={() => select(t.id)}
-                      className={`flex w-full cursor-pointer items-baseline justify-between text-left text-[14px] transition-colors duration-300 ${hoveredId === t.id ? "text-text" : "text-text-2"}`}
-                    >
-                      <span>{t.name}</span>
-                      <span className="text-[12px] text-text-3">{strengthWord(t.strength)}</span>
-                    </button>
-                  </li>
-                ))}
+              <h2 className={`mt-3 shrink-0 ${headlineSize(data.summary.headline)} leading-[1.18] font-semibold tracking-[-0.015em] text-text`}>
+                {data.summary.headline}
+              </h2>
+              <p className="mt-4 line-clamp-3 shrink-0 text-[14px] leading-[1.65] text-text-2">{data.summary.description}</p>
+
+              <div className="mt-6 shrink-0">
+                <Caption>Your sound</Caption>
+                <p className="mt-2 text-[15px] text-text">
+                  {data.traits
+                    .slice(0, 3)
+                    .map((t) => t.name)
+                    .join("  ·  ")}
+                </p>
+              </div>
+
+              <div className="mt-7 shrink-0">
+                <Caption>{focusArtist ? `${focusArtist.name} contributes to` : "Recurring qualities"}</Caption>
+              </div>
+              <ul className="mt-3 min-h-0 space-y-1.5 overflow-y-auto pr-1">
+                {data.traits.map((t) => {
+                  const lit = hoveredId === t.id || selectedId === t.id || !!focusArtist?.traits.includes(t.id);
+                  const quiet = (!!focusArtist || !!hoveredTrait) && !lit;
+                  return (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onMouseEnter={() => hover(t.id)}
+                        onMouseLeave={() => hover(null)}
+                        onClick={() => select(t.id)}
+                        className={`flex w-full cursor-pointer items-baseline justify-between text-left text-[14px] transition-colors duration-300 ${lit ? "text-text" : quiet ? "text-text-3" : "text-text-2"}`}
+                      >
+                        <span>{t.name}</span>
+                        <span className={`text-[12px] ${lit ? "text-text-2" : "text-text-3"}`}>{strengthWord(t.strength)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
-              <p className="mt-6 text-[12px] leading-[1.6] text-text-3">
-                Observations about the music you chose, not measurements of you.
+              <p className="mt-4 shrink-0 text-[12px] leading-[1.6] text-text-3">
+                Hover an artist on the outer orbit to see what it brings. Observations about the music you chose, not
+                measurements of you.
               </p>
             </>
           ) : (
             <>
-              <p className="caption text-magenta/80">Uncharted territory</p>
-              <h2 className="mt-3 text-[30px] leading-[1.18] font-semibold tracking-[-0.015em] text-text">Just beyond your map.</h2>
+              <p className="caption text-magenta/80">Uncharted</p>
+              <h2 className="mt-3 text-[28px] leading-[1.2] font-semibold tracking-[-0.015em] text-text">
+                {countWord(data.discovery.length)} {data.discovery.length === 1 ? "territory sits" : "territories sit"} just outside your
+                current orbit.
+              </h2>
               <p className="mt-4 text-[14px] leading-[1.65] text-text-2">
-                Regions your selected music borders but does not yet reach.
+                Each is reached from somewhere you already know. Choose one to travel there.
               </p>
-              <ul className="mt-8 space-y-2.5">
-                {data.discovery.map((d) => (
-                  <li key={d.id}>
-                    <button
-                      type="button"
-                      onMouseEnter={() => hover(d.id)}
-                      onMouseLeave={() => hover(null)}
-                      onClick={() => select(d.id)}
-                      className={`flex w-full cursor-pointer items-baseline justify-between text-left text-[14px] transition-colors duration-300 ${hoveredId === d.id ? "text-text" : "text-text-2"}`}
-                    >
-                      <span>{d.name}</span>
-                      <span className="text-[12px] text-text-3">{d.kind}</span>
-                    </button>
-                  </li>
-                ))}
+              <ul className="mt-8 min-h-0 space-y-2.5 overflow-y-auto pr-1">
+                {data.discovery.map((d) => {
+                  const lit = hoveredId === d.id || selectedId === d.id;
+                  return (
+                    <li key={d.id}>
+                      <button
+                        type="button"
+                        onMouseEnter={() => hover(d.id)}
+                        onMouseLeave={() => hover(null)}
+                        onClick={() => select(d.id)}
+                        className={`flex w-full cursor-pointer items-baseline justify-between text-left text-[13px] font-medium tracking-[0.14em] uppercase transition-colors duration-300 ${lit ? "text-text" : "text-text-2"}`}
+                      >
+                        <span>{d.name}</span>
+                        <span className="text-[11px] font-normal tracking-[0.04em] text-text-3 normal-case">{d.kind}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}

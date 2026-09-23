@@ -28,7 +28,7 @@ const HIT = { artist: 1.3, genre: 1.6, trait: 0.9, discovery: 1.3 } as const;
 function isInteractive(node: LayoutNode) {
   const s = useSonora.getState();
   if (s.phase !== "ready") return false;
-  if (s.mode === "dna") return node.kind === "trait";
+  if (s.mode === "dna") return node.kind === "trait" || node.kind === "artist";
   if (node.kind === "discovery") return s.mode === "discovery";
   return true;
 }

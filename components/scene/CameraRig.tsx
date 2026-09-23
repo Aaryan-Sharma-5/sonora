@@ -54,7 +54,7 @@ function focusOn(id: string, camera: THREE.Camera, s: SonoraState) {
   if (out.lengthSq() < 1e-3) out.set(camera.position.x, 0, camera.position.z);
   out.normalize();
   const look = p.clone().lerp(new THREE.Vector3(), 0.08);
-  const dist = n.kind === "genre" ? 26 : n.kind === "trait" ? 19 : 23;
+  const dist = n.kind === "genre" ? 27 : n.kind === "trait" ? 20 : 26;
   // Discovery is seen from the known side, looking out into the uncharted region.
   const dir = out.clone().multiplyScalar(n.kind === "discovery" ? -0.8 : 0.8).addScaledVector(UP, 0.62).normalize();
   const pos = look.clone().addScaledVector(dir, dist);
@@ -62,6 +62,25 @@ function focusOn(id: string, camera: THREE.Camera, s: SonoraState) {
   // Shift the view so the object sits left of the detail panel.
   const right = new THREE.Vector3().crossVectors(fwd, UP).normalize().multiplyScalar(dist * 0.2);
   return { pos: pos.add(right).toArray() as V3, target: look.add(right).toArray() as V3 };
+}
+
+/** Frame every node on a connection path, from the current side of the universe. */
+function framePath(ids: string[], camera: THREE.Camera) {
+  const pts = ids.map((id) => nodeAnims.get(id)).filter((a): a is NonNullable<typeof a> => !!a).map((a) => new THREE.Vector3(a.pos.x.target, a.pos.y.target, a.pos.z.target));
+  const center = pts.reduce((c, p) => c.add(p), new THREE.Vector3()).divideScalar(Math.max(1, pts.length));
+  const span = Math.max(10, ...pts.map((p) => p.distanceTo(center)));
+  const az = Math.atan2(camera.position.x - center.x, camera.position.z - center.z);
+  const dist = span * 2.6;
+  const elev = THREE.MathUtils.degToRad(42);
+  const pos = new THREE.Vector3(
+    center.x + Math.sin(az) * Math.cos(elev) * dist,
+    center.y + Math.sin(elev) * dist,
+    center.z + Math.cos(az) * Math.cos(elev) * dist,
+  );
+  // Leave room on the right for the annotation.
+  const fwd = center.clone().sub(pos).normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, UP).normalize().multiplyScalar(span * 0.35);
+  return { pos: pos.add(right).toArray() as V3, target: center.add(right).toArray() as V3 };
 }
 
 /** Look across your universe toward the uncharted region: known space below, the unknown ahead. */
@@ -116,9 +135,18 @@ export default function CameraRig() {
 
       if (s.mode !== prev.mode) {
         // Top-down, with the composition shifted right of the DNA readout.
-        if (s.mode === "dna") go({ pos: [-8, 47, 11], target: [-8, 0, 0.5] }, DUR.camera);
+        if (s.mode === "dna") go({ pos: [-9, 54, 12], target: [-9, 0, 0.5] }, DUR.camera);
         else if (s.mode === "discovery") go(discoveryView(s), DUR.camera + 0.4);
         else go(overview(camera, s), DUR.camera);
+        return;
+      }
+
+      if (s.connect?.ids && s.connect !== prev.connect) {
+        go(framePath(s.connect.ids, camera), DUR.focus + 0.4);
+        return;
+      }
+      if (!s.connect && prev.connect?.ids && !s.selectedId) {
+        go(overview(camera, s), DUR.focus);
         return;
       }
 

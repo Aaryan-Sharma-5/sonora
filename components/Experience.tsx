@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { LabelLayer } from "./scene/Labels";
 import { ActionBar, StatusLine, TopChrome } from "./ui/Chrome";
 import Landing from "./ui/Landing";
-import { DetailPanel, ModeReadout } from "./ui/Panels";
+import { Annotation, ModeReadout } from "./ui/Panels";
 import { useSonora } from "@/lib/store";
 
 const Scene = dynamic(() => import("./scene/Scene"), { ssr: false });
@@ -20,7 +20,7 @@ export default function Experience() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const s = useSonora.getState();
-      if (s.selectedId) s.select(null);
+      if (s.selectedId || s.connect) s.select(null);
       else if (s.mode !== "universe") s.setMode("universe");
     };
     window.addEventListener("keydown", onKey);
@@ -30,7 +30,7 @@ export default function Experience() {
   // Clicking empty space releases focus, but a drag to orbit does not.
   const onMissed = () => {
     const s = useSonora.getState();
-    if (s.phase === "ready" && s.selectedId && !down.current) s.select(null);
+    if (s.phase === "ready" && (s.selectedId || s.connect) && !down.current) s.select(null);
   };
 
   return (
@@ -51,7 +51,7 @@ export default function Experience() {
       <AnimatePresence>{phase === "landing" && <Landing key="landing" />}</AnimatePresence>
       <TopChrome />
       <ModeReadout />
-      <DetailPanel />
+      <Annotation />
       <ActionBar />
       <StatusLine />
     </main>

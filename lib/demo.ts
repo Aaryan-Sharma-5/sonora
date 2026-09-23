@@ -77,10 +77,10 @@ const RAW: RawUniverse = {
   ],
   relationships: [
     { a: "Arctic Monkeys", b: "The Strokes", strength: 0.86, reason: "The same 2000s garage rock revival. Arctic Monkeys openly drew on The Strokes." },
-    { a: "Radiohead", b: "Pink Floyd", strength: 0.78, reason: "Both treat the album as an immersive, atmospheric whole." },
+    { a: "Radiohead", b: "Pink Floyd", strength: 0.78, reason: "OK Computer was widely heard as a Dark Side of the Moon for its decade: albums built as immersive wholes." },
     { a: "Pink Floyd", b: "Tame Impala", strength: 0.74, reason: "A direct psychedelic lineage, from studio haze to modern layered production." },
-    { a: "Radiohead", b: "Tame Impala", strength: 0.5, reason: "A shared interest in texture and studio experimentation." },
-    { a: "Radiohead", b: "Arctic Monkeys", strength: 0.44, reason: "British alternative rock with a growing appetite for mood and space." },
+    { a: "Radiohead", b: "Tame Impala", strength: 0.5, reason: "Both fold electronic texture into guitar records, from Kid A to the synth haze of Currents." },
+    { a: "Radiohead", b: "Arctic Monkeys", strength: 0.44, reason: "British guitar bands that later traded urgency for slower, mood-led records." },
     { a: "Tame Impala", b: "Arctic Monkeys", strength: 0.4, reason: "Both moved toward groove-led, melodic production in the 2010s." },
   ],
   discovery: [

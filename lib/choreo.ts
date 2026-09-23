@@ -98,7 +98,21 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
 
   const focusId = s.hoveredId ?? s.selectedId;
   const related = focusId && L.byId.has(focusId) ? relatedSet(L, focusId) : null;
+  if (related && focusId && s.data) {
+    // Membership comes from the data itself, so it holds even for links not drawn as edges.
+    const artist = s.data.artists.find((x) => x.id === focusId);
+    if (artist) for (const id of [...artist.genres, ...artist.traits]) related.add(id);
+    for (const x of s.data.artists) if (x.traits.includes(focusId) || x.genres.includes(focusId)) related.add(x.id);
+  }
   related?.add(YOU_ID);
+  const dna = s.mode === "dna" && s.phase === "ready";
+  const focusKind = focusId ? L.byId.get(focusId)?.kind : undefined;
+
+  // A found connection takes over: only the path is lit.
+  const path = s.connect?.ids ? new Set(s.connect.ids) : null;
+  const pathEdges = new Set<string>();
+  if (s.connect?.hops) for (const h of s.connect.hops) pathEdges.add([h.from, h.to].sort().join("|"));
+  const picking = s.connect && !s.connect.to ? s.connect.from : null;
 
   const discoveryOpen = s.mode === "discovery" && s.phase === "ready";
   const bridged = new Set<string>();
@@ -119,14 +133,20 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     let opacity = 1;
     let label = 0;
 
-    if (s.mode === "dna" && s.phase === "ready") {
+    if (dna) {
       pos = n.dnaPos;
       if (n.kind === "trait") {
         scale = 2.1;
         label = 1;
-      } else if (n.kind === "artist" || n.kind === "genre") {
-        scale = 0.55;
-        opacity = 0.3;
+      } else if (n.kind === "artist") {
+        // Artists orbit the constellation quietly; they wake when they contribute to the focus.
+        const lit = n.id === focusId || (focusKind === "trait" && (related?.has(n.id) ?? false));
+        scale = lit ? 0.95 : 0.7;
+        opacity = lit ? 1 : 0.55;
+        label = lit ? 0.9 : 0.4;
+      } else if (n.kind === "genre") {
+        scale = 0.5;
+        opacity = 0;
       }
     }
 
@@ -140,7 +160,7 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
       }
     }
 
-    if (n.kind === "artist" && s.mode !== "dna") label = 0.6;
+    if (n.kind === "artist" && !dna) label = 0.6;
     if (n.kind === "you") label = s.phase === "landing" ? 0 : 0.85;
 
     if (s.phase === "landing") {
@@ -158,9 +178,24 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     // Focus: related things brighten, everything else recedes.
     let emphasis = 1;
     let glow = 0;
-    if (related) {
+    if (path) {
+      emphasis = path.has(n.id) ? 1 : 0.15;
+      label = path.has(n.id) ? 1 : 0;
+      if (n.id === s.connect?.from || n.id === s.connect?.to) glow = 1;
+    } else if (picking) {
+      // Choosing a second artist: every artist is a candidate, the first one glows.
+      emphasis = n.kind === "artist" || n.kind === "you" ? 1 : 0.3;
+      if (n.kind === "artist") label = Math.max(label, 0.85);
+      if (n.id === picking) glow = 1;
+      if (n.id === s.hoveredId && n.id !== picking) {
+        glow = 1;
+        scale *= 1.28;
+        label = 1;
+      }
+    } else if (related) {
       emphasis = related.has(n.id) ? 1 : 0.2;
       if (related.has(n.id) && n.kind !== "discovery") label = Math.max(label, n.id === focusId ? 1 : 0.8);
+      else if (dna && n.kind === "trait") label = 0.3;
       else if (n.kind !== "discovery" || !discoveryOpen) label = 0;
       if (n.id === focusId) {
         glow = 1;
@@ -170,6 +205,12 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     } else if (discoveryOpen && n.kind !== "discovery") {
       emphasis = bridged.has(n.id) || n.kind === "you" ? 0.85 : 0.4;
       if (bridged.has(n.id)) label = Math.max(label, 0.7);
+    }
+
+    // In DNA, an artist's focus is about its traits, not its neighbours.
+    if (dna && n.kind === "artist" && focusKind === "artist" && n.id !== focusId) {
+      emphasis = 0.4;
+      label = 0.2;
     }
 
     // Timing
@@ -206,6 +247,8 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
       a.opacity.set(opacity, reason === "focus" ? DUR.hover : dur * 0.8, reason === "focus" ? 0 : modeDelay);
       a.label.set(label, reason === "focus" ? 0.3 : 0.9, reason === "mode" ? 0.9 : 0);
     }
+    // YOU brightens while a new artist is being placed: the universe is listening.
+    if (n.kind === "you" && s.adding) glow = 1;
     a.emphasis.set(emphasis, DUR.hover);
     a.glow.set(glow, DUR.hover);
   }
@@ -217,10 +260,17 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     const touchesFocus = focusId !== null && (e.a === focusId || e.b === focusId);
 
     let alpha = 0;
-    if (s.mode === "dna" && s.phase === "ready") {
+    if (dna) {
       if (e.kind === "you-trait") alpha = 0.3 + e.strength * 0.35;
       if (e.kind === "dna-ring") alpha = 0.22;
-      if (touchesFocus && e.kind === "you-trait") alpha = 0.9;
+      if (focusId) {
+        // Spokes of the traits in play brighten; the rest of the constellation recedes.
+        if (e.kind === "you-trait") alpha = related?.has(e.b) ? 0.85 : 0.12;
+        if (e.kind === "dna-ring") alpha = 0.1;
+        if (e.kind === "artist-trait" && touchesFocus) alpha = 0.32;
+      }
+    } else if (path) {
+      alpha = pathEdges.has([e.a, e.b].sort().join("|")) ? 0.75 : e.rest && e.kind !== "bridge" ? 0.015 : 0;
     } else if (e.kind !== "dna-ring") {
       alpha = e.rest && e.kind !== "bridge" ? 0.035 + e.strength * 0.11 : 0;
       if (discoveryOpen) {
@@ -230,7 +280,9 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
       if (focusId) {
         if (touchesFocus && (e.kind !== "bridge" || discoveryOpen)) {
           // Structure links brighten fully; trait links stay a whisper.
-          alpha = e.kind === "artist-trait" ? 0.14 : e.kind === "bridge" ? 0.45 : 0.28 + e.strength * 0.45;
+          // Nearest-artist paths are the brightest: they are what a selection is about.
+          alpha =
+            e.kind === "artist-trait" ? 0.14 : e.kind === "bridge" ? 0.45 : e.kind === "artist-artist" ? 0.42 + e.strength * 0.45 : 0.24 + e.strength * 0.4;
         }
         else alpha *= 0.3;
       }
