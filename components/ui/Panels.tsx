@@ -138,16 +138,16 @@ function PanelBody({ id, data }: { id: string; data: UniverseData }) {
         </Section>
         {rels.length > 0 && (
           <Section label="Nearest">
-            <ul className="space-y-3">
-              {rels.map((r) => (
-                <li key={r.other.id} className="text-[13.5px] leading-[1.55]">
-                  <span className="text-text">
-                    <Ref id={r.other.id}>{r.other.name}</Ref>
-                  </span>
-                  {r.reason && <span className="block text-text-2">{r.reason}</span>}
-                </li>
-              ))}
-            </ul>
+            <p className="text-[14px] text-text">
+              <Ref id={rels[0].other.id}>{rels[0].other.name}</Ref>
+            </p>
+            {rels[0].reason && <p className="mt-1 text-[13.5px] leading-[1.55] text-text-2">{rels[0].reason}</p>}
+            {rels.length > 1 && (
+              <p className="mt-3 text-[13px] text-text-2">
+                <span className="mr-2 text-text-3">Also near</span>
+                {joinRefs(rels.slice(1).map((r) => r.other))}
+              </p>
+            )}
           </Section>
         )}
         <ConnectEntry id={artist.id} name={artist.name} />
@@ -295,7 +295,7 @@ export function Annotation() {
         ref={(el) => {
           annotation.el = el;
         }}
-        className="absolute top-0 left-0 z-20 w-[320px] [text-shadow:0_0_22px_#05060A,0_0_6px_#05060A]"
+        className="absolute top-0 left-0 z-20 w-[320px]"
       >
         <AnimatePresence mode="wait">
           {id && data && (
@@ -304,7 +304,8 @@ export function Annotation() {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0, transition: { duration: 0.9, ease: EASE, delay: 0.45 } }}
               exit={{ opacity: 0, transition: { duration: 0.3, ease: EASE } }}
-              className="relative max-h-[calc(100vh-240px)] overflow-y-auto pr-1"
+              // A feathered patch of darkness, not a panel: lines passing behind the text recede.
+              className="relative max-h-[calc(100vh-240px)] overflow-y-auto bg-[rgba(5,6,10,0.72)] pr-1 shadow-[0_0_56px_40px_rgba(5,6,10,0.72)]"
             >
               <button
                 type="button"

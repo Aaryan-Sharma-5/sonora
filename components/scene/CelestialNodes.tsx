@@ -33,10 +33,22 @@ function isInteractive(node: LayoutNode) {
   return true;
 }
 
+// A genre is a diffuse region; in a compact universe its hit sphere can cover a
+// nearby star. Artists and traits under the same pointer always win.
+const yieldsTo = (node: LayoutNode, e: ThreeEvent<PointerEvent | MouseEvent>) =>
+  node.kind === "genre" && e.intersections.some((i) => i.object.userData.kind === "artist" || i.object.userData.kind === "trait");
+
 function CelestialNode({ node }: { node: LayoutNode }) {
   const group = useRef<THREE.Group>(null);
   const body = useRef<THREE.Mesh>(null);
   const kind = node.kind as Exclude<LayoutNode["kind"], "you">;
+
+  const claim = (e: ThreeEvent<PointerEvent>) => {
+    if (!isInteractive(node) || yieldsTo(node, e)) return;
+    e.stopPropagation();
+    useSonora.getState().hover(node.id);
+    document.body.style.cursor = "pointer";
+  };
 
   const mat = useMemo(
     () =>
@@ -81,18 +93,18 @@ function CelestialNode({ node }: { node: LayoutNode }) {
         <planeGeometry args={[2, 2]} />
       </mesh>
       <mesh
-        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
-          if (!isInteractive(node)) return;
-          e.stopPropagation();
-          useSonora.getState().hover(node.id);
-          document.body.style.cursor = "pointer";
-        }}
+        userData={{ kind }}
+        onPointerOver={claim}
+        // Stepping off a star back into the genre around it hands hover back to the genre.
+        onPointerMove={kind === "genre" ? (e) => useSonora.getState().hoveredId === null && claim(e) : undefined}
         onPointerOut={() => {
-          if (useSonora.getState().hoveredId === node.id) useSonora.getState().hover(null);
-          document.body.style.cursor = "";
+          const { hoveredId, hover } = useSonora.getState();
+          if (hoveredId === node.id) hover(null);
+          // Leaving a genre while its star is still under the pointer keeps the pointer cursor.
+          if (hoveredId === node.id || hoveredId === null) document.body.style.cursor = "";
         }}
         onClick={(e) => {
-          if (!isInteractive(node) || e.delta > 5) return;
+          if (!isInteractive(node) || e.delta > 5 || yieldsTo(node, e)) return;
           e.stopPropagation();
           useSonora.getState().select(node.id);
         }}

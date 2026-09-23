@@ -173,7 +173,8 @@ export const useSonora = create<SonoraState>((set, get) => {
       flash(`Adding ${clean}…`);
 
       const merged = await fetchExpansion(s.data, clean);
-      set({ data: merged.universe, layout: computeLayout(merged.universe), adding: false });
+      // Grow the existing layout rather than recomputing it: the universe expands, it does not reshuffle.
+      set({ data: merged.universe, layout: computeLayout(merged.universe, get().layout), adding: false });
       flash(merged.shift || null, 7000, true);
       // Once it has emerged, focus the newcomer so the panel explains its place.
       if (merged.artistId) {

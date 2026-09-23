@@ -62,10 +62,48 @@ export function rand(key: string): number {
 
 const polar = (angle: number, r: number, y: number): V3 => [Math.cos(angle) * r, y, Math.sin(angle) * r];
 
-export function computeLayout(u: UniverseData): Layout {
+/** Middle of the widest angular gap, optionally only among the gaps that touch `near`. */
+function openBearing(angles: number[], near?: number): number {
+  const s = angles.map((a) => ((a % TAU) + TAU) % TAU).sort((x, y) => x - y);
+  const at = (a: number) => near !== undefined && Math.abs(Math.atan2(Math.sin(a - near), Math.cos(a - near))) < 1e-6;
+  let best = -1;
+  let mid = near ?? 0;
+  s.forEach((a, i) => {
+    const next = i === s.length - 1 ? s[0] + TAU : s[i + 1];
+    if (near !== undefined && !at(a) && !at(next)) return;
+    if (next - a > best) {
+      best = next - a;
+      mid = a + (next - a) / 2;
+    }
+  });
+  return mid;
+}
+
+/**
+ * Adding to an existing universe: everything already on the map keeps its
+ * bearing, and newcomers settle into open space beside their closest neighbour.
+ */
+function keepBearings(ids: string[], angles: Map<string, number>, prev: Layout, neighbour: (id: string, placed: string[]) => string | undefined) {
+  const placed = new Map<string, number>();
+  for (const id of ids) {
+    const p = prev.byId.get(id);
+    if (p) placed.set(id, Math.atan2(p.pos[2], p.pos[0]));
+  }
+  if (placed.size === 0) return;
+  for (const id of ids) {
+    if (placed.has(id)) continue;
+    const near = neighbour(id, [...placed.keys()]);
+    placed.set(id, openBearing([...placed.values()], near === undefined ? undefined : placed.get(near)));
+  }
+  for (const [id, a] of placed) angles.set(id, a);
+}
+
+/** `prev` is the layout being grown (adding an artist); omit it for a fresh universe. */
+export function computeLayout(u: UniverseData, prev?: Layout | null): Layout {
   const n = u.artists.length;
-  // 5 to 8 artists is the tuned range. Smaller sets contract so they never look sparse.
-  const k = n <= 3 ? 0.78 : n === 4 ? 0.88 : n <= 8 ? 1 : 1.08;
+  // 5 to 8 artists is the tuned range. Smaller sets contract a little so they stay
+  // connected, but keep the same spatial scale: a small universe, not a shrunken one.
+  const k = n <= 3 ? 0.92 : n === 4 ? 0.96 : n <= 8 ? 1 : 1.08;
   const nodes: LayoutNode[] = [];
 
   nodes.push({ id: YOU_ID, kind: "you", name: "YOU", pos: [0, 0, 0], dnaPos: [0, 0, 0], size: 1, seed: 0.5 });
@@ -74,9 +112,10 @@ export function computeLayout(u: UniverseData): Layout {
   const traitOffset = rand("traits") * TAU;
   const traitAngle = new Map<string, number>();
   const traitDnaAngle = new Map<string, number>();
+  u.traits.forEach((t, i) => traitAngle.set(t.id, traitOffset + (i * TAU) / u.traits.length + (rand(t.id + "a") - 0.5) * 0.25));
+  if (prev) keepBearings(u.traits.map((t) => t.id), traitAngle, prev, () => undefined);
   u.traits.forEach((t, i) => {
-    const a = traitOffset + (i * TAU) / u.traits.length + (rand(t.id + "a") - 0.5) * 0.25;
-    traitAngle.set(t.id, a);
+    const a = traitAngle.get(t.id)!;
     const r = (4.6 + (1 - t.strength) * 3.4) * k;
     const dnaA = -Math.PI / 2 + (i * TAU) / u.traits.length;
     traitDnaAngle.set(t.id, dnaA);
@@ -104,10 +143,17 @@ export function computeLayout(u: UniverseData): Layout {
   }
   const genreOffset = rand("genres") * TAU;
   const genreAngle = new Map<string, number>();
-  order.forEach((id, i) => {
+  order.forEach((id, i) => genreAngle.set(id, genreOffset + (i * TAU) / order.length + (rand(id + "a") - 0.5) * 0.18));
+  if (prev) {
+    keepBearings(order, genreAngle, prev, (id, placed) => {
+      let best: string | undefined;
+      for (const x of placed) if (cooc(id, x) > (best ? cooc(id, best) : 0)) best = x;
+      return best;
+    });
+  }
+  order.forEach((id) => {
     const g = u.genres.find((x) => x.id === id)!;
-    const a = genreOffset + (i * TAU) / order.length + (rand(id + "a") - 0.5) * 0.18;
-    genreAngle.set(id, a);
+    const a = genreAngle.get(id)!;
     const r = (10.8 + (1 - g.weight) * 3.6) * k;
     nodes.push({
       id,
@@ -205,29 +251,16 @@ export function computeLayout(u: UniverseData): Layout {
       name: p.a.name,
       pos: [p.x, (rand(p.a.id + "y") - 0.5) * 3.6, p.z],
       // An ellipse, wider than tall, to fit the frame around the trait constellation.
-      dnaPos: [Math.cos(dnaAngles[i]) * 25, -1.5, Math.sin(dnaAngles[i]) * 19.5],
+      dnaPos: [Math.cos(dnaAngles[i]) * 23, -1.5, Math.sin(dnaAngles[i]) * 18],
       size: 0.85 + p.centrality * 0.35,
       seed: rand(p.a.id),
     });
   });
 
-  // Discovery sector: the widest angular gap between artists and genres.
-  const angles = nodes
-    .filter((nd) => nd.kind === "artist" || nd.kind === "genre")
-    .map((nd) => (Math.atan2(nd.pos[2], nd.pos[0]) + TAU) % TAU)
-    .sort((x, y) => x - y);
-  let sectorAngle = rand("sector") * TAU;
-  if (angles.length > 1) {
-    let best = -1;
-    for (let i = 0; i < angles.length; i++) {
-      const next = i === angles.length - 1 ? angles[0] + TAU : angles[i + 1];
-      const gap = next - angles[i];
-      if (gap > best) {
-        best = gap;
-        sectorAngle = angles[i] + gap / 2;
-      }
-    }
-  }
+  // Discovery sector: the widest angular gap between artists and genres. A growing
+  // universe keeps its uncharted region where the visitor last saw it.
+  const angles = nodes.filter((nd) => nd.kind === "artist" || nd.kind === "genre").map((nd) => Math.atan2(nd.pos[2], nd.pos[0]));
+  const sectorAngle = prev ? prev.sectorAngle : angles.length > 1 ? openBearing(angles) : rand("sector") * TAU;
   const sectorR = 33 * k;
   const sectorCenter = polar(sectorAngle, sectorR, -1.5);
 

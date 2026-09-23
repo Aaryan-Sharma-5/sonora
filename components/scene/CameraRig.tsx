@@ -22,15 +22,37 @@ const LANDING = { pos: [-11, 25, 56] as V3, target: [-16.5, -1, 1] as V3 };
  * upper right of the frame, visible but at the edge.
  */
 function overview(camera: THREE.Camera, s: SonoraState, faceSector = false) {
-  const dist = Math.max(38, (s.layout?.radius ?? 20) * 2.2);
   const az =
     faceSector && s.layout ? -s.layout.sectorAngle - 0.75 : Math.atan2(camera.position.x, camera.position.z);
   // Aim slightly toward the near side, lifting the disc clear of the controls at the bottom.
   const lift = 3;
-  return {
+  const at = (dist: number) => ({
     pos: [Math.sin(az) * (Math.cos(ELEVATION) * dist + lift), Math.sin(ELEVATION) * dist, Math.cos(az) * (Math.cos(ELEVATION) * dist + lift)] as V3,
     target: [Math.sin(az) * lift, 0, Math.cos(az) * lift] as V3,
-  };
+  });
+  let dist = Math.max(38, (s.layout?.radius ?? 20) * 2.2);
+  let view = at(dist);
+  // A large universe, or a star that lands on the near side, can reach the controls.
+  // Pull back only as far as it takes for every artist to clear the frame.
+  for (let i = 0; i < 8 && !artistsFit(view, camera, s); i++) view = at((dist *= 1.05));
+  return view;
+}
+
+const probe = new THREE.PerspectiveCamera();
+const pv = new THREE.Vector3();
+
+/** Does every artist (and its label, to the right) sit inside the frame, above the controls band? */
+function artistsFit(view: { pos: V3; target: V3 }, camera: THREE.Camera, s: SonoraState) {
+  if (!s.layout || !(camera instanceof THREE.PerspectiveCamera)) return true;
+  probe.copy(camera);
+  probe.position.set(...view.pos);
+  probe.lookAt(...view.target);
+  probe.updateMatrixWorld();
+  return s.layout.nodes.every((n) => {
+    if (n.kind !== "artist") return true;
+    pv.set(...n.pos).project(probe);
+    return pv.x > -0.86 && pv.x < 0.8 && pv.y > -0.76 && pv.y < 0.84;
+  });
 }
 
 /** Frame a node with the universe behind it, leaving room for the panel on the right. */
@@ -70,8 +92,11 @@ function framePath(ids: string[], camera: THREE.Camera) {
   const center = pts.reduce((c, p) => c.add(p), new THREE.Vector3()).divideScalar(Math.max(1, pts.length));
   const span = Math.max(10, ...pts.map((p) => p.distanceTo(center)));
   const az = Math.atan2(camera.position.x - center.x, camera.position.z - center.z);
-  const dist = span * 2.6;
-  const elev = THREE.MathUtils.degToRad(42);
+  // Higher and further than a single focus, so the near end of the path clears the controls.
+  const dist = span * 3.1;
+  const elev = THREE.MathUtils.degToRad(56);
+  const lift = new THREE.Vector3(Math.sin(az), 0, Math.cos(az)).multiplyScalar(span * 0.3);
+  center.add(lift);
   const pos = new THREE.Vector3(
     center.x + Math.sin(az) * Math.cos(elev) * dist,
     center.y + Math.sin(elev) * dist,
@@ -135,7 +160,8 @@ export default function CameraRig() {
 
       if (s.mode !== prev.mode) {
         // Top-down, with the composition shifted right of the DNA readout.
-        if (s.mode === "dna") go({ pos: [-9, 54, 12], target: [-9, 0, 0.5] }, DUR.camera);
+        // High enough that the outer artist orbit clears the screen edges and the controls.
+        if (s.mode === "dna") go({ pos: [-9, 66, 13], target: [-9, 0, 0.5] }, DUR.camera);
         else if (s.mode === "discovery") go(discoveryView(s), DUR.camera + 0.4);
         else go(overview(camera, s), DUR.camera);
         return;
@@ -157,8 +183,11 @@ export default function CameraRig() {
         return;
       }
 
-      if (s.layout !== prev.layout && s.layout && prev.layout && s.layout.radius > prev.layout.radius + 0.5 && !s.selectedId) {
-        go(overview(camera, s), DUR.mode);
+      if (s.layout !== prev.layout && s.layout && prev.layout && !s.selectedId && controls.current) {
+        // The universe grew: pull back if the new star would land outside the current frame.
+        const o = overview(camera, s);
+        const need = new THREE.Vector3(...o.pos).distanceTo(new THREE.Vector3(...o.target));
+        if (need > camera.position.distanceTo(controls.current.target) + 0.5) go(o, DUR.mode);
       }
     });
   }, [camera]);

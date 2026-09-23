@@ -83,8 +83,8 @@ export function annotatedId(s: { selectedId: string | null; connect: { to?: stri
 const v = new THREE.Vector3();
 const last = new Map<string, number>();
 const rect = { x: 0, y: 0, w: 0, h: 0, on: false };
-const GAP = 64;
-const EDGE = 32;
+const GAP = 118; // clears the body's own label
+const EDGE = 40;
 
 /**
  * Keep the annotation attached to its object: beside it on screen, on whichever
@@ -109,9 +109,10 @@ function placeAnnotation(s: ReturnType<typeof useSonora.getState>, camera: THREE
   const minX = s.phase === "ready" && s.mode !== "universe" ? 440 : EDGE;
   let x = nx + GAP;
   const leftSide = x + w > W - EDGE;
-  if (leftSide) x = nx - GAP - w;
+  if (leftSide) x = nx - 48 - w;
   x = Math.min(Math.max(x, minX), W - EDGE - w);
-  const y = Math.min(Math.max(ny - 36, 92), Math.max(92, H - 130 - h));
+  // The title sits level with the body; the rest reads downward, clamped above the controls.
+  const y = Math.min(Math.max(ny - 64, 92), Math.max(92, H - 140 - h));
   el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
   Object.assign(rect, { x, y, w, h, on: true });
 
