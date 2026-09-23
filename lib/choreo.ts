@@ -4,7 +4,7 @@
 // and are advanced once per frame by `tick`.
 
 import { DUR, Tween, Tween3 } from "./motion";
-import { relatedSet, YOU_ID, type LayoutEdge, type LayoutNode } from "./layout";
+import { relatedSet, UNCHARTED_ID, YOU_ID, type LayoutEdge, type LayoutNode } from "./layout";
 import type { SonoraState } from "./store";
 
 export interface NodeAnim {
@@ -96,27 +96,40 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
 
   const dur = reason === "focus" ? DUR.hover : reason === "phase" ? 0.9 : reason === "build" ? DUR.emerge : DUR.mode;
 
-  const focusId = s.hoveredId ?? s.selectedId;
-  const related = focusId && L.byId.has(focusId) ? relatedSet(L, focusId) : null;
+  // Looking toward the uncharted region is not a focus on any one thing.
+  const lookingOut = s.hoveredId === UNCHARTED_ID && s.mode === "universe" && s.phase === "ready";
+  const hovered = lookingOut ? null : s.hoveredId;
+  // A newly added artist holds the focus until the visitor points somewhere else.
+  const arriving = !hovered && !s.selectedId && s.arrival ? s.arrival : null;
+  const focusId = hovered ?? s.selectedId ?? arriving?.[0] ?? null;
+  let related = focusId && L.byId.has(focusId) ? relatedSet(L, focusId) : null;
+  if (focusId === YOU_ID) {
+    // What defines the selection: its strongest currents and regions, not everything it touches.
+    related = new Set([YOU_ID]);
+    for (const e of L.edges) if (e.a === YOU_ID && e.rest) related.add(e.b);
+  }
   if (related && focusId && s.data) {
     // Membership comes from the data itself, so it holds even for links not drawn as edges.
     const artist = s.data.artists.find((x) => x.id === focusId);
     if (artist) for (const id of [...artist.genres, ...artist.traits]) related.add(id);
     for (const x of s.data.artists) if (x.traits.includes(focusId) || x.genres.includes(focusId)) related.add(x.id);
   }
+  if (related && arriving) for (const id of arriving) related.add(id);
   related?.add(YOU_ID);
   const dna = s.mode === "dna" && s.phase === "ready";
   const focusKind = focusId ? L.byId.get(focusId)?.kind : undefined;
 
-  // A found connection takes over: only the path is lit.
-  const path = s.connect?.ids ? new Set(s.connect.ids) : null;
+  // A found connection, or one traced by hovering a second artist, takes over: only the path is lit.
+  const found = s.connect?.ids && s.connect.hops ? { ids: s.connect.ids, hops: s.connect.hops } : null;
+  const traced = !found && s.trace && hovered ? s.trace : null;
+  const path = found ?? traced ? new Set((found ?? traced)!.ids) : null;
   const pathEdges = new Set<string>();
-  if (s.connect?.hops) for (const h of s.connect.hops) pathEdges.add([h.from, h.to].sort().join("|"));
+  for (const h of (found ?? traced)?.hops ?? []) pathEdges.add([h.from, h.to].sort().join("|"));
   const picking = s.connect && !s.connect.to ? s.connect.from : null;
 
   const discoveryOpen = s.mode === "discovery" && s.phase === "ready";
   const bridged = new Set<string>();
-  if (discoveryOpen) for (const e of L.edges) if (e.kind === "bridge") bridged.add(e.a);
+  if (discoveryOpen || lookingOut) for (const e of L.edges) if (e.kind === "bridge") bridged.add(e.a);
 
   const kindIndex: Record<string, number> = {};
   const hiddenBeforeData = s.phase === "building" && !s.dataReady;
@@ -153,6 +166,10 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     if (n.kind === "discovery") {
       if (discoveryOpen) {
         label = 1;
+      } else if (lookingOut) {
+        // Faint, unnamed points out past the edge of the map: something is there.
+        scale = 0.3;
+        opacity = 0.5;
       } else {
         pos = L.sectorCenter;
         scale = 0.2;
@@ -181,13 +198,18 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     if (path) {
       emphasis = path.has(n.id) ? 1 : 0.15;
       label = path.has(n.id) ? 1 : 0;
-      if (n.id === s.connect?.from || n.id === s.connect?.to) glow = 1;
+      if (found) {
+        if (n.id === s.connect?.from || n.id === s.connect?.to) glow = 1;
+      } else {
+        if (n.id === s.selectedId || n.id === hovered) glow = 1;
+        if (n.id === hovered) scale *= 1.28;
+      }
     } else if (picking) {
       // Choosing a second artist: every artist is a candidate, the first one glows.
       emphasis = n.kind === "artist" || n.kind === "you" ? 1 : 0.3;
       if (n.kind === "artist") label = Math.max(label, 0.85);
       if (n.id === picking) glow = 1;
-      if (n.id === s.hoveredId && n.id !== picking) {
+      if (n.id === hovered && n.id !== picking) {
         glow = 1;
         scale *= 1.28;
         label = 1;
@@ -199,10 +221,11 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
       else if (n.kind !== "discovery" || !discoveryOpen) label = 0;
       if (n.id === focusId) {
         glow = 1;
-        scale *= n.id === s.hoveredId ? 1.28 : 1.15;
+        scale *= n.id === hovered ? 1.28 : 1.15;
         label = 1;
       }
-    } else if (discoveryOpen && n.kind !== "discovery") {
+    } else if ((discoveryOpen || lookingOut) && n.kind !== "discovery") {
+      // The parts of the known map that border the unknown.
       emphasis = bridged.has(n.id) || n.kind === "you" ? 0.85 : 0.4;
       if (bridged.has(n.id)) label = Math.max(label, 0.7);
     }
@@ -234,8 +257,9 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
       a.label.set(label, 1, 1.3);
     } else if (n.kind === "discovery" && discoveryOpen && reason === "mode") {
       // Discovery emerges from the uncharted region, one destination at a time.
+      // Points already glimpsed from the edge of the map grow where they are.
       const delay = 1.1 + idx * 0.16;
-      a.pos.jump(L.sectorCenter);
+      if (a.opacity.target === 0) a.pos.jump(L.sectorCenter);
       a.pos.set(pos, DUR.emerge + 0.4, delay);
       a.scale.set(scale, DUR.emerge, delay);
       a.opacity.set(opacity, DUR.emerge, delay);
@@ -277,14 +301,21 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
         if (e.kind === "bridge") alpha = 0.1;
         else alpha *= 0.45;
       }
+      // Faint threads from the known map out to what lies past its edge.
+      if (lookingOut && e.kind === "bridge") alpha = 0.07;
       if (focusId) {
-        if (touchesFocus && (e.kind !== "bridge" || discoveryOpen)) {
-          // Structure links brighten fully; trait links stay a whisper.
-          // Nearest-artist paths are the brightest: they are what a selection is about.
+        const other = e.a === focusId ? e.b : e.a;
+        if (touchesFocus && related?.has(other) && (e.kind !== "bridge" || discoveryOpen)) {
+          // Structure links brighten fully. Trait links stay a whisper, except when the
+          // trait itself is asked who creates it. Nearest-artist paths are the brightest.
           alpha =
-            e.kind === "artist-trait" ? 0.14 : e.kind === "bridge" ? 0.45 : e.kind === "artist-artist" ? 0.42 + e.strength * 0.45 : 0.24 + e.strength * 0.4;
-        }
-        else alpha *= 0.3;
+            e.kind === "artist-trait"
+              ? focusKind === "trait" ? 0.36 : 0.14
+              : e.kind === "bridge" ? 0.45 : e.kind === "artist-artist" ? 0.42 + e.strength * 0.45 : 0.24 + e.strength * 0.4;
+        } else if (focusKind === "artist" && e.a === YOU_ID && related?.has(e.b)) {
+          // Why an artist is here: its genres and qualities, traced back to YOU.
+          alpha = 0.1 + e.strength * 0.22;
+        } else alpha *= 0.3;
       }
     }
     if (s.phase === "landing") alpha *= 0.55;
@@ -297,7 +328,7 @@ export function sync(s: SonoraState, prev: SonoraState | null) {
     } else {
       const drawIn = e.kind === "bridge" || e.kind === "dna-ring" || isNew;
       if (alpha > 0 && a.reveal.target === 0) {
-        const delay = isNew ? 1.4 : e.kind === "bridge" ? 1.8 : e.kind === "dna-ring" ? 1.5 : 0;
+        const delay = isNew ? 1.4 : e.kind === "bridge" ? (reason === "focus" ? 0.15 : 1.8) : e.kind === "dna-ring" ? 1.5 : 0;
         a.reveal.set(1, drawIn ? 1.2 : 0.01, delay);
       } else if (alpha === 0 && drawIn && a.reveal.target === 1) {
         a.reveal.set(0, 0, DUR.hover);

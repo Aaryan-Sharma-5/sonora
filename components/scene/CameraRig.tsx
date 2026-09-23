@@ -55,6 +55,29 @@ function artistsFit(view: { pos: V3; target: V3 }, camera: THREE.Camera, s: Sono
   });
 }
 
+// The idle drift keeps OrbitControls' old auto-rotate pace (0.22), in radians per second.
+const DRIFT_SPEED = ((2 * Math.PI) / 60) * 0.22;
+const DRIFT_STEP = THREE.MathUtils.degToRad(5);
+
+/**
+ * How far the current view can turn either way around its target while every
+ * artist stays inside the frame and clear of the controls. The drift sways
+ * within this range instead of carrying stars under the UI.
+ */
+function driftRange(camera: THREE.Camera, target: THREE.Vector3, s: SonoraState): [number, number] {
+  const view = (th: number) => ({
+    pos: camera.position.clone().sub(target).applyAxisAngle(UP, th).add(target).toArray() as V3,
+    target: target.toArray() as V3,
+  });
+  if (!artistsFit(view(0), camera, s)) return [0, 0];
+  const reach = (dir: number) => {
+    let th = 0;
+    while (Math.abs(th) < Math.PI && artistsFit(view(th + dir * DRIFT_STEP), camera, s)) th += dir * DRIFT_STEP;
+    return th;
+  };
+  return [reach(-1), reach(1)];
+}
+
 /** Frame a node with the universe behind it, leaving room for the panel on the right. */
 function focusOn(id: string, camera: THREE.Camera, s: SonoraState) {
   const n = s.layout?.byId.get(id);
@@ -124,6 +147,23 @@ export default function CameraRig() {
   const camera = useThree((s) => s.camera);
   const controls = useRef<OrbitControlsImpl>(null);
   const move = useRef({ pos: new Tween3(LANDING.pos), target: new Tween3(LANDING.target), until: 0 });
+  const drift = useRef({ on: false, lo: 0, hi: 0, angle: 0, v: 0, dir: -1, dragging: false, layout: null as SonoraState["layout"] });
+
+  useEffect(() => {
+    const c = controls.current;
+    if (!c) return;
+    const start = () => (drift.current.dragging = true);
+    const end = () => {
+      drift.current.dragging = false;
+      drift.current.on = false; // measure the range again from wherever the visitor left the view
+    };
+    c.addEventListener("start", start);
+    c.addEventListener("end", end);
+    return () => {
+      c.removeEventListener("start", start);
+      c.removeEventListener("end", end);
+    };
+  }, []);
 
   useEffect(() => {
     camera.position.set(...LANDING.pos);
@@ -218,7 +258,26 @@ export default function CameraRig() {
       }
     }
     // A very slow drift while the visitor is simply looking.
-    c.autoRotate = s.phase === "ready" && s.mode === "universe" && !s.selectedId && !s.hoveredId && m.until === 0;
+    const d = drift.current;
+    const idle = s.phase === "ready" && s.mode === "universe" && !s.selectedId && !s.hoveredId && m.until === 0 && !d.dragging;
+    if (!idle || d.layout !== s.layout) {
+      d.on = false;
+      d.v = 0;
+    }
+    if (idle) {
+      if (!d.on) {
+        [d.lo, d.hi] = driftRange(camera, c.target, s);
+        Object.assign(d, { on: true, angle: 0, layout: s.layout });
+      }
+      // Turn back just before an artist would reach the edge or the controls; the turn eases.
+      if (d.angle <= d.lo + DRIFT_STEP) d.dir = 1;
+      else if (d.angle >= d.hi - DRIFT_STEP) d.dir = -1;
+      const goal = d.hi - d.lo > DRIFT_STEP * 2 ? d.dir * DRIFT_SPEED : 0;
+      d.v += (goal - d.v) * Math.min(1, delta * 0.5);
+      const th = d.v * delta;
+      d.angle += th;
+      camera.position.sub(c.target).applyAxisAngle(UP, th).add(c.target);
+    }
   });
 
   return (
@@ -233,7 +292,6 @@ export default function CameraRig() {
       minDistance={8}
       maxDistance={110}
       maxPolarAngle={1.42}
-      autoRotateSpeed={0.22}
     />
   );
 }

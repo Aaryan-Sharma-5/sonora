@@ -397,8 +397,7 @@ export function ModeReadout() {
                 })}
               </ul>
               <p className="mt-4 shrink-0 text-[12px] leading-[1.6] text-text-3">
-                Hover an artist on the outer orbit to see what it brings. Observations about the music you chose, not
-                measurements of you.
+                Observations about the music you chose, not measurements of you.
               </p>
             </>
           ) : (
@@ -409,7 +408,7 @@ export function ModeReadout() {
                 current orbit.
               </h2>
               <p className="mt-4 text-[14px] leading-[1.65] text-text-2">
-                Each is reached from somewhere you already know. Choose one to travel there.
+                Each is reached from somewhere you already know.
               </p>
               <ul className="mt-8 min-h-0 space-y-2.5 overflow-y-auto pr-1">
                 {data.discovery.map((d) => {

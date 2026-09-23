@@ -41,6 +41,8 @@ export interface Layout {
 }
 
 export const YOU_ID = "you";
+/** The uncharted region itself, as a hover target: not a node, a direction. */
+export const UNCHARTED_ID = "__uncharted";
 const TAU = Math.PI * 2;
 
 function hash(s: string): number {

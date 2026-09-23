@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { rand, type Layout } from "@/lib/layout";
+import { rand, UNCHARTED_ID, type Layout } from "@/lib/layout";
 import { Tween, now } from "@/lib/motion";
 import { useSonora, type SonoraState } from "@/lib/store";
 import { billboardVertex, nebulaFragment, orbitVertex, pointFragment } from "./shaders";
@@ -17,7 +17,7 @@ function intensityFor(s: SonoraState) {
   if (s.phase === "building") return s.dataReady ? 0.55 : 0.2;
   if (s.mode === "dna") return 0.12;
   if (s.mode === "discovery") return 1;
-  return 0.8;
+  return s.hoveredId === UNCHARTED_ID ? 1.15 : 0.8;
 }
 
 export default function Nebula({ layout }: { layout: Layout }) {
@@ -78,7 +78,8 @@ export default function Nebula({ layout }: { layout: Layout }) {
 
   useEffect(() => {
     const apply = (s: SonoraState) => {
-      intensity.current.set(intensityFor(s), 2.2, s.mode === "discovery" ? 0.6 : 0);
+      const looking = s.hoveredId === UNCHARTED_ID;
+      intensity.current.set(intensityFor(s), looking ? 0.9 : 2.2, s.mode === "discovery" ? 0.6 : 0);
       spread.current.set(s.mode === "discovery" && s.phase === "ready" ? 1.35 : 0.55, 3.2, 0.8);
     };
     apply(useSonora.getState());
@@ -99,10 +100,38 @@ export default function Nebula({ layout }: { layout: Layout }) {
     dustGroup.current?.scale.setScalar(sp);
   });
 
+  // From the overview, the region itself can be entered: hover to look out, click to travel.
+  const open = () => {
+    const s = useSonora.getState();
+    return s.phase === "ready" && s.mode === "universe" && !s.selectedId && !s.connect && !s.adding;
+  };
+
   return (
     <group position={center}>
       <mesh ref={cloud} material={mat} frustumCulled={false}>
         <planeGeometry args={[2, 2]} />
+      </mesh>
+      <mesh
+        onPointerOver={(e) => {
+          if (!open()) return;
+          e.stopPropagation();
+          useSonora.getState().hover(UNCHARTED_ID);
+          document.body.style.cursor = "pointer";
+        }}
+        onPointerOut={() => {
+          if (useSonora.getState().hoveredId !== UNCHARTED_ID) return;
+          useSonora.getState().hover(null);
+          document.body.style.cursor = "";
+        }}
+        onClick={(e) => {
+          if (!open() || e.delta > 5) return;
+          e.stopPropagation();
+          document.body.style.cursor = "";
+          useSonora.getState().setMode("discovery");
+        }}
+      >
+        <sphereGeometry args={[7, 12, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <group ref={dustGroup}>
         <points ref={dustPoints} geometry={dust.g} material={dust.m} frustumCulled={false} />

@@ -21,6 +21,10 @@ export interface SonoraState {
   adding: boolean;
   // "What connects these?": picking a second artist (no `to` yet), then the found path.
   connect: { from: string; to?: string; ids?: string[]; hops?: Hop[] } | null;
+  // With one artist selected, hovering another traces the path between them.
+  trace: { ids: string[]; hops: Hop[] } | null;
+  // Just after adding an artist: the newcomer first, then everything it created or shifted.
+  arrival: string[] | null;
 
   create: (artists: string[]) => Promise<void>;
   hover: (id: string | null) => void;
@@ -94,6 +98,8 @@ export const useSonora = create<SonoraState>((set, get) => {
     status: null,
     adding: false,
     connect: null,
+    trace: null,
+    arrival: null,
 
     async create(artists) {
       if (get().phase !== "landing") return;
@@ -124,7 +130,11 @@ export const useSonora = create<SonoraState>((set, get) => {
     },
 
     hover(id) {
-      if (get().hoveredId !== id) set({ hoveredId: id });
+      const s = get();
+      if (s.hoveredId === id) return;
+      const sel = s.selectedId;
+      const tracing = s.mode === "universe" && sel?.startsWith("a:") && id?.startsWith("a:") && id !== sel && s.layout && s.data;
+      set({ hoveredId: id, trace: tracing ? findConnection(s.layout!, s.data!, sel!, id!) : null });
     },
 
     select(id) {
@@ -132,7 +142,7 @@ export const useSonora = create<SonoraState>((set, get) => {
       if (s.connect && !s.connect.to && id && id.startsWith("a:") && id !== s.connect.from && s.layout && s.data) {
         const path = findConnection(s.layout, s.data, s.connect.from, id);
         if (path) {
-          set({ connect: { from: s.connect.from, to: id, ...path }, selectedId: null, hoveredId: null });
+          set({ connect: { from: s.connect.from, to: id, ...path }, selectedId: null, hoveredId: null, trace: null });
           flash(null);
         } else {
           flash("Nothing on this map connects them yet.", 3200);
@@ -143,18 +153,18 @@ export const useSonora = create<SonoraState>((set, get) => {
         flash(null);
         set({ connect: null });
       }
-      if (get().selectedId !== id) set({ selectedId: id, hoveredId: null });
+      if (get().selectedId !== id) set({ selectedId: id, hoveredId: null, trace: null, arrival: null });
     },
 
     startConnect(from) {
       if (get().phase !== "ready" || (get().data?.artists.length ?? 0) < 2) return;
-      set({ connect: { from }, selectedId: from });
+      set({ connect: { from }, selectedId: from, trace: null, arrival: null });
       flash("Choose another artist.");
     },
 
     setMode(mode) {
       if (get().phase !== "ready" || get().mode === mode) return;
-      set({ mode, selectedId: null, hoveredId: null, connect: null });
+      set({ mode, selectedId: null, hoveredId: null, connect: null, trace: null, arrival: null });
     },
 
     async addArtist(name) {
@@ -169,17 +179,27 @@ export const useSonora = create<SonoraState>((set, get) => {
         flash("Your universe is full.", 3000);
         return;
       }
-      set({ adding: true, mode: "universe", selectedId: null, hoveredId: null, connect: null });
+      set({ adding: true, mode: "universe", selectedId: null, hoveredId: null, connect: null, trace: null, arrival: null });
       flash(`Adding ${clean}…`);
 
       const merged = await fetchExpansion(s.data, clean);
-      // Grow the existing layout rather than recomputing it: the universe expands, it does not reshuffle.
-      set({ data: merged.universe, layout: computeLayout(merged.universe, get().layout), adding: false });
+      // What the newcomer brought: new genres and qualities, and qualities it strengthened or weakened.
+      const before = new Map([...s.data.genres, ...s.data.traits].map((x) => [x.id, "strength" in x ? x.strength : 0]));
+      const moved = [...merged.universe.genres, ...merged.universe.traits]
+        .filter((x) => !before.has(x.id) || ("strength" in x && Math.abs(x.strength - before.get(x.id)!) >= 0.05))
+        .map((x) => x.id);
+      set({
+        data: merged.universe,
+        // Grow the existing layout rather than recomputing it: the universe expands, it does not reshuffle.
+        layout: computeLayout(merged.universe, get().layout),
+        adding: false,
+        arrival: merged.artistId ? [merged.artistId, ...moved] : null,
+      });
       flash(merged.shift || null, 7000, true);
-      // Once it has emerged, focus the newcomer so the panel explains its place.
+      // Let the newcomer emerge with everything it changed lit, then focus it so the panel explains its place.
       if (merged.artistId) {
-        await wait(2400);
-        if (!get().selectedId) set({ selectedId: merged.artistId });
+        await wait(3800);
+        if (get().arrival?.[0] === merged.artistId) set({ arrival: null, selectedId: merged.artistId });
       }
     },
   };
