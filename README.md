@@ -39,7 +39,7 @@ Instead, it is a focused, interactive spatial representation of musical relation
 
 ```mermaid
 flowchart LR
-    A[Artist Input] --> B[Claude Analysis]
+    A[Artist Input] --> B[Groq Analysis]
     B --> C[Structured Universe]
     C --> D[Validation & Normalization]
     D --> E[Deterministic Layout]
@@ -47,7 +47,7 @@ flowchart LR
     F --> G[Interactive Universe]
 ```
 
-The server-side Claude analysis generates structured data (not UI or code), returning artist metadata, genres, traits, artist relationships, relationship explanations, and discovery territories.
+The server-side AI analysis via Groq generates structured data (not UI or code), returning artist metadata, genres, traits, artist relationships, relationship explanations, and discovery territories.
 
 A robust normalization layer ensures that:
 - malformed references are removed
@@ -62,23 +62,23 @@ A robust normalization layer ensures that:
 | **Frontend** | Next.js, React, TypeScript, Tailwind CSS |
 | **3D & Rendering** | Three.js, React Three Fiber, Drei |
 | **State & Motion** | Zustand, Framer Motion |
-| **AI** | Anthropic Claude API, Anthropic TypeScript SDK |
+| **AI** | Groq API, Groq TypeScript SDK (`openai/gpt-oss-120b`) |
 | **Validation** | Zod |
 
 ## Architecture
 
-* **`app/api/universe/` & `app/api/expand/`**: Server-only API routes executing Claude calls with structured output.
-* **`lib/claude.ts`**: The Anthropic pipeline and caching layer.
+* **`app/api/universe/` & `app/api/expand/`**: Server-only API routes executing Groq calls with structured output.
+* **`lib/groq.ts`**: The Groq pipeline, structured output parsing, and caching layer.
 * **`lib/universe.ts`**: The data contract and tolerant normalizer.
 * **`lib/layout.ts`**: The deterministic layout algorithm ensuring consistent spatial generation.
 * **`lib/choreo.ts` & `lib/motion.ts`**: The unified choreography logic governing all 3D transitions.
 * **`components/scene/`**: The core React Three Fiber components.
 * **`components/ui/`**: Minimal DOM overlays.
 
-## Claude Integration
+## Groq Integration
 
-* Claude API calls happen entirely server-side. `ANTHROPIC_API_KEY` is never exposed to the browser.
-* Structured output from the LLM is strictly validated using Zod.
+* Groq API calls happen entirely server-side. `GROQ_API_KEY` is never exposed to the browser.
+* Structured output from the LLM is strictly validated using Zod schemas.
 * If a response is unusable, the server performs one stricter retry. 
 * If analysis remains unusable, SONORA gracefully falls back to its offline reference universe.
 * Repeated requests for the exact same artist list are served from an in-memory cache.
@@ -86,7 +86,7 @@ A robust normalization layer ensures that:
 
 ## Demo Mode
 
-SONORA provides a reliable offline fallback for presentations without depending on a live Claude request. 
+SONORA provides a reliable offline fallback for presentations without depending on a live Groq request. 
 
 The reference universe defaults to **A.R. Rahman, Kishore Kumar, Lata Mangeshkar, Arijit Singh, and Shreya Ghoshal**. Adding **Sonu Nigam** to this setup is also supported entirely offline.
 
@@ -131,9 +131,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 | Variable | Required | Purpose |
 | :--- | :--- | :--- |
-| `ANTHROPIC_API_KEY` | Yes* | Required for live Claude analysis. *(Not required for demo/offline mode)* |
-| `ANTHROPIC_WORKSPACE_ID` | Optional | Required only if your API key is scoped to a specific workspace. |
-| `SONORA_MODEL` | Optional | Model override for the Claude API (defaults to `claude-opus-5`). |
+| `GROQ_API_KEY` | Yes* | Required for live Groq analysis. *(Not required for demo/offline mode)* |
+| `SONORA_MODEL` | Optional | Model override for the Groq API (defaults to `openai/gpt-oss-120b`). |
 
 ## Development
 
@@ -147,7 +146,7 @@ npm run build  # Create a production build
 
 The core experience is complete and supports:
 - Artist input parsing
-- Server-side Claude analysis
+- Server-side Groq analysis
 - Reference/offline universe fallback
 - 3D spatial exploration
 - Music DNA extraction

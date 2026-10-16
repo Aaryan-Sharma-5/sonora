@@ -67,7 +67,8 @@ async function fetchExpansion(u: UniverseData, name: string) {
       signal: AbortSignal.timeout(70_000),
     });
     const json = await res.json();
-    const merged = mergeExpansion(u, json?.expansion, json?.source === "claude" ? "claude" : "demo");
+    const isLive = json?.source === "groq" || json?.source === "claude";
+    const merged = mergeExpansion(u, json?.expansion, isLive ? (json?.source ?? "groq") : "demo");
     if (merged.artistId) return merged;
   } catch {
     // fall through

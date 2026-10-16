@@ -1,4 +1,4 @@
-import { generateExpansion } from "@/lib/claude";
+import { generateExpansion } from "@/lib/groq";
 import { demoExpansion } from "@/lib/demo";
 import { normalizeUniverse, toRaw, type UniverseData } from "@/lib/universe";
 

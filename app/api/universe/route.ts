@@ -1,4 +1,4 @@
-import { generateUniverse } from "@/lib/claude";
+import { generateUniverse } from "@/lib/groq";
 import { demoUniverseFor } from "@/lib/demo";
 
 export const maxDuration = 90;

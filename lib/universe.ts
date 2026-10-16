@@ -2,7 +2,7 @@
 // Claude (or the demo) returns into a render-safe structure. Nothing downstream
 // should ever need to guard against missing fields.
 
-export type Source = "claude" | "demo";
+export type Source = "groq" | "claude" | "demo";
 
 export interface Artist {
   id: string;
@@ -300,7 +300,8 @@ export function mergeExpansion(
     relationships: [...(raw.relationships ?? []), ...arr<NonNullable<RawUniverse["relationships"]>[number]>(exp.relationships)],
   };
 
-  const universe = normalizeUniverse(merged, u.source === "claude" && source === "claude" ? "claude" : "demo", LIMITS.genresExpanded);
+  const isLive = (u.source === "groq" || u.source === "claude") && (source === "groq" || source === "claude");
+  const universe = normalizeUniverse(merged, isLive ? source : "demo", LIMITS.genresExpanded);
   if (!universe) return { universe: u, artistId: null, shift: "" };
   const artistId = "a:" + slug(artistName);
   return {
